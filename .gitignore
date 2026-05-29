@@ -1,6 +1,14 @@
-*.csv
-*.xlsx
-CLAUDE.md
+# Employee/payroll data and generated output — never commit
+data/
+output/
 
+# Local configuration with site-specific settings (EIDs, names, locations)
+local_config.py
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
 .DS_Store
 .Rhistory

@@ -6,6 +6,11 @@ from pathlib import Path
 
 import openpyxl
 
+try:
+    from local_config import UNSCHEDULED_STAFF
+except ImportError:
+    UNSCHEDULED_STAFF = set()
+
 # Maps keywords in Position Name → canonical location matching home_units.csv
 LOCATION_MAP = [
     ('memorial beach', 'Sharon'),
@@ -14,7 +19,7 @@ LOCATION_MAP = [
     ('sharon',         'Sharon'),
 ]
 
-# Position categories that aren't regular work shifts — skip these
+# Position categories that aren't regular work shifts - skip these
 SKIP_POSITIONS = {
     'available senior staff',
     'general staff',
@@ -205,6 +210,8 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
     all_keys = sched_keys | audit_keys
 
     for (eid, date_str) in sorted(all_keys):
+        if eid in UNSCHEDULED_STAFF:
+            continue
         worker_name = (home_units.get(eid, {}).get('name')
                        or (audit_by_emp_date[(eid, date_str)][0][2]
                            if (eid, date_str) in audit_by_emp_date else f'EID {eid}'))
@@ -217,8 +224,8 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
                 rows.append({
                     'name':      worker_name,
                     'date':      date_str,
-                    'sched':     f"{fmt_mins(sched_start)}–{fmt_mins(sched_end)}",
-                    'reported':  '—',
+                    'sched':     f"{fmt_mins(sched_start)}-{fmt_mins(sched_end)}",
+                    'reported':  '-',
                     'flags':     'no time reported',
                 })
             continue
@@ -232,21 +239,21 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
                 rows.append({
                     'name':      worker_name,
                     'date':      date_str,
-                    'sched':     '—',
-                    'reported':  f"{fmt_mins(in_mins)}–{fmt_mins(out_mins)}",
+                    'sched':     '-',
+                    'reported':  f"{fmt_mins(in_mins)}-{fmt_mins(out_mins)}",
                     'flags':     ', '.join(flags),
                 })
             continue
 
-        # Both sides present — match each actual block to its closest scheduled shift
+        # Both sides present - match each actual block to its closest scheduled shift
         matched_scheds = set()
         for in_mins, out_mins, _w in actual_blocks:
             if in_mins is None or out_mins is None:
                 rows.append({
                     'name':      worker_name,
                     'date':      date_str,
-                    'sched':     '—',
-                    'reported':  f"{fmt_mins(in_mins)}–{fmt_mins(out_mins)}",
+                    'sched':     '-',
+                    'reported':  f"{fmt_mins(in_mins)}-{fmt_mins(out_mins)}",
                     'flags':     'missed punch',
                 })
                 continue
@@ -260,8 +267,8 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
                 rows.append({
                     'name':      worker_name,
                     'date':      date_str,
-                    'sched':     '—',
-                    'reported':  f"{fmt_mins(in_mins)}–{fmt_mins(out_mins)}",
+                    'sched':     '-',
+                    'reported':  f"{fmt_mins(in_mins)}-{fmt_mins(out_mins)}",
                     'flags':     'extra block',
                 })
                 continue
@@ -282,8 +289,8 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
             rows.append({
                 'name':      worker_name,
                 'date':      date_str,
-                'sched':     f"{fmt_mins(sched_start)}–{fmt_mins(sched_end)}",
-                'reported':  f"{fmt_mins(in_mins)}–{fmt_mins(out_mins)}",
+                'sched':     f"{fmt_mins(sched_start)}-{fmt_mins(sched_end)}",
+                'reported':  f"{fmt_mins(in_mins)}-{fmt_mins(out_mins)}",
                 'flags':     ', '.join(parts),
             })
 
@@ -293,8 +300,8 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
                 rows.append({
                     'name':      worker_name,
                     'date':      date_str,
-                    'sched':     f"{fmt_mins(sched_start)}–{fmt_mins(sched_end)}",
-                    'reported':  '—',
+                    'sched':     f"{fmt_mins(sched_start)}-{fmt_mins(sched_end)}",
+                    'reported':  '-',
                     'flags':     'no time reported',
                 })
 
@@ -302,11 +309,15 @@ def build_comparison_rows(schedule, audit_blocks, home_units):
 
 
 def main():
-    base_dir = Path(__file__).parent
-    home_units = load_home_units(base_dir / 'home_units.csv')
+    base_dir  = Path(__file__).parent
+    data_dir  = base_dir / 'data'
+    out_dir   = base_dir / 'output'
+    out_dir.mkdir(exist_ok=True)
+
+    home_units = load_home_units(data_dir / 'home_units.csv')
 
     schedule_files = sorted(
-        f for f in base_dir.iterdir()
+        f for f in data_dir.iterdir()
         if f.suffix.lower() == '.csv' and f.name.lower() != 'home_units.csv'
     )
 
@@ -375,10 +386,10 @@ def main():
     grand_total = sum(s['total_hours'] for s in staff_list)
     print(f"\n{len(staff_list)} staff member(s), {grand_total:.2f} scheduled hours.")
 
-    # --- Output 3: schedule vs. audit comparison ---
-    audit_path = base_dir / 'Time_Block_Audit_-_Cost_Center.xlsx'
+    # --- Output 3: schedule vs. audit comparison (Excel only) ---
+    audit_path = data_dir / 'Time_Block_Audit_-_Cost_Center.xlsx'
     if not audit_path.exists():
-        print('\n[No audit file found — skipping schedule comparison]')
+        print('\n[No audit file found - skipping schedule comparison]')
         return
 
     schedule     = load_schedule(schedule_files)
@@ -388,14 +399,31 @@ def main():
     flagged = [r for r in rows if r['flags']]
     clean   = [r for r in rows if not r['flags']]
 
-    print(f'\n{"=" * 90}')
-    print(f'SCHEDULE vs. AUDIT  (tolerance: {TOLERANCE_MINS} min)  —  '
-          f'{len(flagged)} flagged, {len(clean)} clean')
-    print(f'{"=" * 90}')
-    print(f"{'Employee':<28} {'Date':<12} {'Scheduled':<13} {'Reported':<13} {'Flags'}")
-    print('-' * 90)
+    wb_out = openpyxl.Workbook()
+
+    # Tab 1: Site Transfers
+    ws1 = wb_out.active
+    ws1.title = 'Site Transfers'
+    ws1.append(['Employee', 'Date', 'Home Unit', 'Worked At'])
+    for e in flags:
+        ws1.append([e['name'], e['date'], e['home'], e['worked_at']])
+
+    # Tab 2: Scheduled Hours
+    ws2 = wb_out.create_sheet('Scheduled Hours')
+    ws2.append(['Employee', 'Scheduled Hours'])
+    for s in staff_list:
+        ws2.append([s['name'], s['total_hours']])
+    ws2.append(['TOTAL', grand_total])
+
+    # Tab 3: Schedule vs. Audit
+    ws3 = wb_out.create_sheet('Schedule vs Audit')
+    ws3.append(['Employee', 'Date', 'Scheduled', 'Reported', 'Flags'])
     for r in rows:
-        print(f"{r['name']:<28} {r['date']:<12} {r['sched']:<13} {r['reported']:<13} {r['flags']}")
+        ws3.append([r['name'], r['date'], r['sched'], r['reported'], r['flags']])
+
+    out_path = out_dir / 'review_time_output.xlsx'
+    wb_out.save(out_path)
+    print(f'\nExcel written to {out_path}  ({len(flagged)} flagged, {len(clean)} clean in Schedule vs Audit tab)')
 
 
 if __name__ == '__main__':
