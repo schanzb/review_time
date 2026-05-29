@@ -1,0 +1,6 @@
+*.csv
+*.xlsx
+CLAUDE.md
+
+.DS_Store
+.Rhistory
